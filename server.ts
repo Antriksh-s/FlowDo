@@ -1079,6 +1079,233 @@ You must return a JSON response matching this schema:
     }
 });
 
+app.post('/api/intelligent-reschedule', async (req, res) => {
+  const { tasks = [], events = [], fixedTasks = [], morningTriage = '', habitProfile = [], wakeHour = 7 } = req.body;
+
+  // Support keys and provider from headers
+  const clientProvider = (req.headers['x-ai-provider'] || 'gemini') as 'gemini' | 'openai' | 'anthropic' | 'deepseek';
+  const clientGeminiKey = req.headers['x-gemini-api-key'] as string;
+  const clientAnthropicKey = req.headers['x-anthropic-api-key'] as string;
+  const clientDeepseekKey = req.headers['x-deepseek-api-key'] as string;
+
+  const activeProvider = clientProvider === 'openai' ? 'gemini' : clientProvider;
+
+  const apiKeys = {
+    gemini: (clientGeminiKey && clientGeminiKey.trim() !== 'MY_GEMINI_API_KEY' && clientGeminiKey.trim() !== '') ? clientGeminiKey.trim() : (process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || geminiApiKey),
+    anthropic: (clientAnthropicKey && clientAnthropicKey.trim() !== '') ? clientAnthropicKey.trim() : process.env.ANTHROPIC_API_KEY,
+    deepseek: (clientDeepseekKey && clientDeepseekKey.trim() !== '') ? clientDeepseekKey.trim() : process.env.DEEPSEEK_API_KEY,
+  };
+
+  const isAiAvailable = (activeProvider === 'gemini' && !!apiKeys.gemini && apiKeys.gemini !== 'MY_GEMINI_API_KEY') ||
+                        (activeProvider === 'anthropic' && !!apiKeys.anthropic) ||
+                        (activeProvider === 'deepseek' && !!apiKeys.deepseek);
+
+  if (!isAiAvailable) {
+    // Local fallback: identify any active tasks, shift if they overlap with anything. If they exceed 22:00, add to nextDayTasks
+    const updatedTasks: any[] = [];
+    const updatedEvents: any[] = [];
+    const nextDayTasks: any[] = [];
+    
+    const parseTimeToMinutes = (tStr: string) => {
+      const [h, m] = tStr.split(':').map(Number);
+      return (isNaN(h) ? 0 : h) * 60 + (isNaN(m) ? 0 : m);
+    };
+
+    const minutesToTime = (m: number) => {
+      const h = Math.floor(m / 60) % 24;
+      const mins = m % 60;
+      return `${h.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+    };
+
+    // Find any tasks overlapping with meetings, fixed routine, or OOO
+    let currentFreePointer = wakeHour * 60 + 60; // start 1 hr after waking
+
+    for (const t of tasks) {
+      if (t.status === 'completed') continue;
+      
+      const duration = t.microSteps && t.microSteps.length > 0
+        ? t.microSteps.reduce((sum: number, ms: any) => sum + (ms.estimatedMinutes || 20), 0)
+        : 60;
+
+      // Find first free slot for duration that doesn't overlap with locked meetings/OOO
+      let slotFound = false;
+      while (!slotFound && currentFreePointer < 24 * 60) {
+        const slotStart = currentFreePointer;
+        const slotEnd = slotStart + duration;
+
+        // Check if overlaps with fixed tasks
+        const overlapFixed = fixedTasks.some((ft: any) => {
+          const ftStart = parseTimeToMinutes(ft.startTime);
+          const ftEnd = parseTimeToMinutes(ft.endTime);
+          return slotStart < ftEnd && slotEnd > ftStart;
+        });
+
+        // Check if overlaps with meetings or OOO
+        const overlapEvent = events.some((e: any) => {
+          if (e.connectedTaskId === t.id) return false;
+          if (e.type !== 'meeting' && !e.title.includes('Out of Office') && !e.title.includes('🛑')) return false;
+          const eStart = parseTimeToMinutes(e.startTime);
+          const eEnd = parseTimeToMinutes(e.endTime);
+          return slotStart < eEnd && slotEnd > eStart;
+        });
+
+        if (!overlapFixed && !overlapEvent) {
+          slotFound = true;
+          if (slotEnd > 22 * 60) {
+            // Move to next day!
+            nextDayTasks.push({
+              id: t.id,
+              title: t.title,
+              reason: "Day is fully packed, moved to tomorrow to ensure quality execution."
+            });
+          } else {
+            const scheduledTime = minutesToTime(slotStart);
+            updatedTasks.push({ id: t.id, scheduledTime });
+            
+            // Sync with existing calendar event
+            const connectedEvt = events.find((e: any) => e.connectedTaskId === t.id);
+            if (connectedEvt) {
+              updatedEvents.push({
+                id: connectedEvt.id,
+                startTime: scheduledTime,
+                endTime: minutesToTime(slotEnd),
+                title: connectedEvt.title
+              });
+            }
+            currentFreePointer = slotEnd + 30; // 30-min buffer
+          }
+        } else {
+          currentFreePointer += 15; // slide by 15 mins
+        }
+      }
+    }
+
+    return res.json({
+      updatedTasks,
+      updatedEvents: events.map((e: any) => {
+        const updated = updatedEvents.find((ue: any) => ue.id === e.id);
+        return updated ? { ...e, startTime: updated.startTime, endTime: updated.endTime, title: updated.title } : e;
+      }),
+      nextDayTasks,
+      coachingSummary: "Calculated conflict-free agenda using standard safety-biorhythms."
+    });
+  }
+
+  try {
+    const systemInstruction = `You are the Elite AI Scheduling Agent.
+Your job is to reschedule the user's focus tasks and meetings for today to resolve overlaps, optimize the flow, and respect Out-Of-Office (work halt) blocks.
+
+INPUT CONTEXTS PROVIDED:
+1. Active Tasks: List of tasks with estimated durations (microSteps duration or 60 minutes default).
+2. Calendar Events: List of meetings, OOO, and calendar blocks.
+3. Locked Routine blocks: (fixedTasks).
+4. Morning Triage standup: Notes/transcript explaining user constraints, priority tasks, and coffee/energy timings.
+5. Wake Hour: Hour the user woke up.
+6. Habit Biorhythm preferences.
+
+STRICT RESCHEDULING RULES:
+1. Chronological Dependencies & Sequence Constraints:
+   - Identify dependencies, pre-requisites, and sequence constraints from the Morning Triage (e.g., "I need to prepare the monthly report before meeting with boss", "do task X before event Y").
+   - These sequencing requirements are ABSOLUTE. You MUST schedule the preparation task strictly BEFORE the dependent event or meeting.
+   - If a new block (such as an Out of Office block or meeting) overlaps or conflicts:
+     - First, try to fit the preparation task in a free slot preceding the Out of Office or meeting.
+     - Second, if there is an Out of Office block, you may allow a half-hour (30-minute) window between the Out of Office block and the dependent meeting/task to squeeze the preparation task in directly before the meet.
+     - Third, if the preparation task cannot be scheduled before the dependent meeting (e.g. because of rigid block placements), you MUST reschedule or shift the dependent meeting/event to a later slot (using the updatedEvents list) so that the preparation task can happen before it.
+     - Fourth, if the meeting cannot be shifted or the preparation task cannot fit today, do NOT put the preparation task after the meeting. Explain the conflict in coachingSummary and propose reschedule alternatives or suggest to the user to reschedule the meeting.
+2. Out-Of-Office (OOO): If there is an 'Out of Office' or 'Work Halt' event (often starting with a stop emoji 🛑 or titled with 'Out of Office'), this is fully blocked. No tasks can be scheduled during this interval.
+3. Focus optimizations: Group tasks near peak circadian energy levels if mentioned in morning triage or habit profile.
+4. Next Day Postponement:
+   - If some tasks do not fit in today's remaining time (up to 10 PM) due to conflicts or OOO blocks, move them to the "nextDayTasks" list.
+   - A task is moved to nextDayTasks ONLY if there is simply not enough free time to complete it today without creating overlaps.
+   - ALWAYS explain clearly in the "coachingSummary" why a task had to be postponed to the next day, and state that we are asking the user for their final consent/approval before finalizing this change.
+
+You must return a JSON response matching this schema:
+{
+  "updatedTasks": [
+    { "id": "t-id", "scheduledTime": "HH:MM" }
+  ],
+  "updatedEvents": [
+    { "id": "e-id", "startTime": "HH:MM", "endTime": "HH:MM", "title": "Updated Title" }
+  ],
+  "nextDayTasks": [
+    { "id": "t-id", "title": "Task Title", "reason": "Specific reason why this task must be postponed to the next day" }
+  ],
+  "coachingSummary": "A brief explanation of how the schedule has been optimized and what was shifted."
+}`;
+
+    const prompt = `Reschedule today's agenda.
+Tasks: ${JSON.stringify(tasks)}
+Events: ${JSON.stringify(events)}
+Routine Blocks (Fixed): ${JSON.stringify(fixedTasks)}
+Morning Triage Context: ${morningTriage}
+Wake Hour: ${wakeHour}
+Habit Profile: ${JSON.stringify(habitProfile)}`;
+
+    const responseText = await callLlm({
+      provider: activeProvider,
+      systemInstruction,
+      prompt,
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          updatedTasks: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                scheduledTime: { type: Type.STRING },
+              },
+              required: ['id', 'scheduledTime'],
+            },
+          },
+          updatedEvents: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                startTime: { type: Type.STRING },
+                endTime: { type: Type.STRING },
+                title: { type: Type.STRING },
+              },
+              required: ['id', 'startTime', 'endTime', 'title'],
+            },
+          },
+          nextDayTasks: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                title: { type: Type.STRING },
+                reason: { type: Type.STRING },
+              },
+              required: ['id', 'title', 'reason'],
+            },
+          },
+          coachingSummary: { type: Type.STRING },
+        },
+        required: ['updatedTasks', 'updatedEvents', 'nextDayTasks', 'coachingSummary'],
+      },
+      apiKeys,
+    });
+
+    let cleanText = responseText.trim();
+    if (cleanText.startsWith('```json')) {
+      cleanText = cleanText.replace(/^```json/, '').replace(/```$/, '').trim();
+    } else if (cleanText.startsWith('```')) {
+      cleanText = cleanText.replace(/^```/, '').replace(/```$/, '').trim();
+    }
+    const parsed = JSON.parse(cleanText);
+
+    return res.json(parsed);
+  } catch (err: any) {
+    console.error('Error during intelligent reschedule:', err);
+    return res.status(500).json({ error: err.message || 'Intelligent rescheduling failed.' });
+  }
+});
+
 // Serve static build or delegate to Vite in development
 async function start() {
   if (process.env.NODE_ENV !== 'production') {

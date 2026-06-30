@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Calendar, Zap, Sun, Moon, Activity, Lock, Plus, Trash2, ShieldAlert, Mic, Sparkles, Maximize2, X } from 'lucide-react';
+import { Calendar, Zap, Sun, Moon, Activity, Lock, Plus, Trash2, ShieldAlert, Mic, Sparkles, Maximize2, X, Check } from 'lucide-react';
 import { Task, CalendarEvent, FixedTask } from '../types';
 import { getEnergyForHour } from '../data';
 import { classifyActivity, getCategoryStyles, ActivityClassification } from '../lib/activityClassifier';
@@ -112,6 +112,229 @@ export default function FlowStateCalendar({
   const [editEndTime, setEditEndTime] = useState('');
   const [editTypeSpecific, setEditTypeSpecific] = useState('');
 
+  // AI Rescheduling conflict resolution states
+  const [isAiRescheduleModalOpen, setIsAiRescheduleModalOpen] = useState(false);
+  const [aiRescheduleLoading, setAiRescheduleLoading] = useState(false);
+  const [aiRescheduleResult, setAiRescheduleResult] = useState<{
+    updatedTasks: Array<{ id: string; scheduledTime: string }>;
+    updatedEvents: Array<any>;
+    nextDayTasks: Array<{ id: string; title: string; reason: string }>;
+    coachingSummary: string;
+  } | null>(null);
+  const [showNextDayConsent, setShowNextDayConsent] = useState(false);
+  const [aiRescheduleError, setAiRescheduleError] = useState('');
+
+  // Helper to detect overlaps/conflicts among active elements
+  const findConflicts = () => {
+    const list: Array<{
+      type: 'task-task' | 'task-meeting' | 'task-fixed' | 'task-ooo';
+      item1: { id: string; title: string; startTime: string; endTime: string };
+      item2: { id: string; title: string; startTime: string; endTime: string };
+    }> = [];
+
+    const getTaskEndMin = (task: Task, startMin: number) => {
+      const duration = task.microSteps && task.microSteps.length > 0 
+        ? task.microSteps.reduce((sum, ms) => sum + (ms.estimatedMinutes || 20), 0)
+        : 60;
+      return startMin + duration;
+    };
+
+    // 1. Prepare active scheduled tasks with start and end times
+    const activeTasks = tasks
+      .filter(t => t.scheduledTime && t.status !== 'completed')
+      .map(t => {
+        const startMin = timeToMinutes(t.scheduledTime!);
+        const endMin = getTaskEndMin(t, startMin);
+        return {
+          id: t.id,
+          title: t.title,
+          startTime: t.scheduledTime!,
+          endTime: minutesToTime(endMin),
+          startMin,
+          endMin,
+          raw: t
+        };
+      });
+
+    // 2. Prepare calendar events
+    const calEvents = events.map(e => {
+      const startMin = timeToMinutes(e.startTime);
+      const endMin = timeToMinutes(e.endTime);
+      return {
+        id: e.id,
+        title: e.title,
+        startTime: e.startTime,
+        endTime: e.endTime,
+        startMin,
+        endMin,
+        type: e.type,
+        raw: e
+      };
+    });
+
+    // 3. Prepare fixed tasks
+    const fixedBlocks = fixedTasks.map(f => {
+      const startMin = timeToMinutes(f.startTime);
+      const endMin = timeToMinutes(f.endTime);
+      return {
+        id: f.id,
+        title: f.title,
+        startTime: f.startTime,
+        endTime: f.endTime,
+        startMin,
+        endMin,
+        raw: f
+      };
+    });
+
+    // Helper to check overlap
+    const isOverlapping = (b1: any, b2: any) => {
+      return b1.startMin < b2.endMin && b1.endMin > b2.startMin;
+    };
+
+    // Compare active tasks with other active tasks
+    for (let i = 0; i < activeTasks.length; i++) {
+      for (let j = i + 1; j < activeTasks.length; j++) {
+        if (isOverlapping(activeTasks[i], activeTasks[j])) {
+          list.push({
+            type: 'task-task',
+            item1: activeTasks[i],
+            item2: activeTasks[j]
+          });
+        }
+      }
+    }
+
+    // Compare active tasks with calendar events
+    for (const t of activeTasks) {
+      for (const e of calEvents) {
+        if (e.raw.connectedTaskId === t.id) continue; // Skip self-connected event
+        if (isOverlapping(t, e)) {
+          const isOOO = e.title.includes('Out of Office') || e.title.includes('🛑');
+          list.push({
+            type: isOOO ? 'task-ooo' : 'task-meeting',
+            item1: t,
+            item2: e
+          });
+        }
+      }
+    }
+
+    // Compare active tasks with fixed blocks
+    for (const t of activeTasks) {
+      for (const f of fixedBlocks) {
+        if (isOverlapping(t, f)) {
+          list.push({
+            type: 'task-fixed',
+            item1: t,
+            item2: f
+          });
+        }
+      }
+    }
+
+    return list;
+  };
+
+  const conflicts = findConflicts();
+
+  const handleStartAiReschedule = async () => {
+    setIsAiRescheduleModalOpen(true);
+    setAiRescheduleLoading(true);
+    setAiRescheduleResult(null);
+    setShowNextDayConsent(false);
+    setAiRescheduleError('');
+
+    try {
+      const response = await fetch('/api/intelligent-reschedule', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-ai-provider': aiProvider || 'gemini',
+          'x-gemini-api-key': clientGeminiApiKey?.trim() || '',
+          'x-openai-api-key': clientOpenaiApiKey?.trim() || '',
+          'x-anthropic-api-key': clientAnthropicApiKey?.trim() || '',
+          'x-deepseek-api-key': clientDeepseekApiKey?.trim() || '',
+        },
+        body: JSON.stringify({
+          tasks,
+          events,
+          fixedTasks,
+          morningTriage: localStorage.getItem('flow_morning_triage_context') || '',
+          wakeHour,
+          habitProfile
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to call intelligent scheduler.');
+      }
+
+      const data = await response.json();
+      setAiRescheduleResult(data);
+      if (data.nextDayTasks && data.nextDayTasks.length > 0) {
+        setShowNextDayConsent(true);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setAiRescheduleError(err.message || 'Rescheduling request failed.');
+    } finally {
+      setAiRescheduleLoading(false);
+    }
+  };
+
+  const handleApplyAiReschedule = () => {
+    if (!aiRescheduleResult) return;
+
+    // 1. Update tasks
+    if (setTasks) {
+      setTasks(prev => {
+        let updated = prev.map(t => {
+          const matchUpdate = aiRescheduleResult.updatedTasks?.find(ut => ut.id === t.id);
+          if (matchUpdate) {
+            return { ...t, scheduledTime: matchUpdate.scheduledTime };
+          }
+          const matchPostponed = aiRescheduleResult.nextDayTasks?.find(nd => nd.id === t.id);
+          if (matchPostponed) {
+            return { ...t, scheduledTime: undefined };
+          }
+          return t;
+        });
+        return updated;
+      });
+    }
+
+    // 2. Update events
+    if (setEvents) {
+      setEvents(prev => {
+        let updated = prev.map(e => {
+          const matchUpdate = aiRescheduleResult.updatedEvents?.find(ue => ue.id === e.id);
+          if (matchUpdate) {
+            return { ...e, startTime: matchUpdate.startTime, endTime: matchUpdate.endTime, title: matchUpdate.title || e.title };
+          }
+          return e;
+        });
+
+        if (aiRescheduleResult.nextDayTasks && aiRescheduleResult.nextDayTasks.length > 0) {
+          updated = updated.filter(e => {
+            if (e.connectedTaskId) {
+              const isPostponed = aiRescheduleResult.nextDayTasks.some(nd => nd.id === e.connectedTaskId);
+              return !isPostponed;
+            }
+            return true;
+          });
+        }
+
+        return updated;
+      });
+    }
+
+    setIsAiRescheduleModalOpen(false);
+    setAiRescheduleResult(null);
+    setShowNextDayConsent(false);
+  };
+
   React.useEffect(() => {
     if (selectedItem) {
       setEditTitle(selectedItem.title);
@@ -131,11 +354,25 @@ export default function FlowStateCalendar({
     if (setTasks) {
       setTasks(prev => prev.filter(t => t.id !== taskId));
     }
+    if (setEvents) {
+      setEvents(prev => prev.filter(e => e.connectedTaskId !== taskId));
+    }
   };
 
   const handleDeleteEvent = (eventId: string) => {
+    let connectedTaskId: string | undefined;
     if (setEvents) {
-      setEvents(prev => prev.filter(e => e.id !== eventId));
+      setEvents(prev => {
+        const found = prev.find(e => e.id === eventId);
+        if (found) {
+          connectedTaskId = found.connectedTaskId;
+        }
+        return prev.filter(e => e.id !== eventId);
+      });
+    }
+    if (connectedTaskId && setTasks) {
+      const tid = connectedTaskId;
+      setTasks(prev => prev.filter(t => t.id !== tid));
     }
   };
 
@@ -183,10 +420,26 @@ export default function FlowStateCalendar({
         }
         return t;
       }));
+
+      if (setEvents) {
+        setEvents(prev => prev.map(evt => {
+          if (evt.connectedTaskId === taskId) {
+            return {
+              ...evt,
+              title: editTitle,
+              startTime: editStartTime,
+              endTime: editEndTime
+            };
+          }
+          return evt;
+        }));
+      }
     } else if (type === 'event' && setEvents) {
       const eventId = id.replace('e-', '');
+      let connectedTaskId: string | undefined;
       setEvents(prev => prev.map(e => {
         if (e.id === eventId) {
+          connectedTaskId = e.connectedTaskId;
           return { 
             ...e, 
             title: editTitle, 
@@ -197,6 +450,40 @@ export default function FlowStateCalendar({
         }
         return e;
       }));
+
+      if (connectedTaskId && setTasks) {
+        const tid = connectedTaskId;
+        setTasks(prev => prev.map(t => {
+          if (t.id === tid) {
+            const newStartMins = timeToMinutes(editStartTime);
+            const newEndMins = timeToMinutes(editEndTime);
+            const duration = Math.max(15, newEndMins - newStartMins);
+            
+            let updated = { ...t, title: editTitle, scheduledTime: editStartTime };
+            const currentSum = updated.microSteps?.reduce((sum, ms) => sum + (ms.estimatedMinutes || 20), 0) || 60;
+            const diff = duration - currentSum;
+            if (updated.microSteps && updated.microSteps.length > 0) {
+              updated.microSteps = updated.microSteps.map((ms, idx) => {
+                if (idx === 0) {
+                  return { ...ms, estimatedMinutes: Math.max(5, (ms.estimatedMinutes || 20) + diff) };
+                }
+                return ms;
+              });
+            } else {
+              updated.microSteps = [{
+                id: 'ms-fallback-' + Date.now(),
+                title: 'General Focus Step',
+                estimatedMinutes: duration,
+                energyRequired: 'Medium',
+                status: 'todo',
+                resources: []
+              }];
+            }
+            return updated;
+          }
+          return t;
+        }));
+      }
     } else if (type === 'fixed' && setFixedTasks) {
       const fixedTaskId = id.replace('f-', '');
       setFixedTasks(prev => prev.map(f => {
@@ -249,14 +536,48 @@ export default function FlowStateCalendar({
           }
           return t;
         }));
+        if (setEvents) {
+          setEvents(prev => prev.map(e => e.connectedTaskId === taskId ? { ...e, endTime: newEndTime } : e));
+        }
       } else if (resizingItem.type === 'event' && setEvents) {
         const eventId = resizingItem.id.replace('e-', '');
+        let connectedTaskId: string | undefined;
         setEvents(prev => prev.map(evt => {
           if (evt.id === eventId) {
+            connectedTaskId = evt.connectedTaskId;
             return { ...evt, endTime: newEndTime };
           }
           return evt;
         }));
+        if (connectedTaskId && setTasks) {
+          const tid = connectedTaskId;
+          setTasks(prev => prev.map(t => {
+            if (t.id === tid) {
+              const updated = { ...t };
+              const currentSum = updated.microSteps?.reduce((sum, ms) => sum + (ms.estimatedMinutes || 20), 0) || 60;
+              const diff = snappedDuration - currentSum;
+              if (updated.microSteps && updated.microSteps.length > 0) {
+                updated.microSteps = updated.microSteps.map((ms, idx) => {
+                  if (idx === 0) {
+                    return { ...ms, estimatedMinutes: Math.max(5, (ms.estimatedMinutes || 20) + diff) };
+                  }
+                  return ms;
+                });
+              } else {
+                updated.microSteps = [{
+                  id: 'ms-fallback-' + Date.now(),
+                  title: 'General Focus Step',
+                  estimatedMinutes: snappedDuration,
+                  energyRequired: 'Medium',
+                  status: 'todo',
+                  resources: []
+                }];
+              }
+              return updated;
+            }
+            return t;
+          }));
+        }
       } else if (resizingItem.type === 'fixed' && setFixedTasks) {
         const fixedTaskId = resizingItem.id.replace('f-', '');
         setFixedTasks(prev => prev.map(f => {
@@ -329,9 +650,23 @@ export default function FlowStateCalendar({
       if (type === 'task' && setTasks) {
         const taskId = id.replace('t-', '');
         setTasks(prev => prev.map(t => t.id === taskId ? { ...t, scheduledTime: newStartTime } : t));
+        if (setEvents) {
+          setEvents(prev => prev.map(evt => evt.connectedTaskId === taskId ? { ...evt, startTime: newStartTime, endTime: newEndTime } : evt));
+        }
       } else if (type === 'event' && setEvents) {
         const eventId = id.replace('e-', '');
-        setEvents(prev => prev.map(e => e.id === eventId ? { ...e, startTime: newStartTime, endTime: newEndTime } : e));
+        let connectedTaskId: string | undefined;
+        setEvents(prev => prev.map(evt => {
+          if (evt.id === eventId) {
+            connectedTaskId = evt.connectedTaskId;
+            return { ...evt, startTime: newStartTime, endTime: newEndTime };
+          }
+          return evt;
+        }));
+        if (connectedTaskId && setTasks) {
+          const tid = connectedTaskId;
+          setTasks(prev => prev.map(t => t.id === tid ? { ...t, scheduledTime: newStartTime } : t));
+        }
       } else if (type === 'fixed' && setFixedTasks) {
         const fixedTaskId = id.replace('f-', '');
         setFixedTasks(prev => prev.map(f => f.id === fixedTaskId ? { ...f, startTime: newStartTime, endTime: newEndTime } : f));
@@ -356,9 +691,23 @@ export default function FlowStateCalendar({
       if (type === 'task' && setTasks) {
         const taskId = id.replace('t-', '');
         setTasks(prev => prev.map(t => t.id === taskId ? { ...t, scheduledTime: newStartTime } : t));
+        if (setEvents) {
+          setEvents(prev => prev.map(evt => evt.connectedTaskId === taskId ? { ...evt, startTime: newStartTime, endTime: newEndTime } : evt));
+        }
       } else if (type === 'event' && setEvents) {
         const eventId = id.replace('e-', '');
-        setEvents(prev => prev.map(e => e.id === eventId ? { ...e, startTime: newStartTime, endTime: newEndTime } : e));
+        let connectedTaskId: string | undefined;
+        setEvents(prev => prev.map(evt => {
+          if (evt.id === eventId) {
+            connectedTaskId = evt.connectedTaskId;
+            return { ...evt, startTime: newStartTime, endTime: newEndTime };
+          }
+          return evt;
+        }));
+        if (connectedTaskId && setTasks) {
+          const tid = connectedTaskId;
+          setTasks(prev => prev.map(t => t.id === tid ? { ...t, scheduledTime: newStartTime } : t));
+        }
       } else if (type === 'fixed' && setFixedTasks) {
         const fixedTaskId = id.replace('f-', '');
         setFixedTasks(prev => prev.map(f => f.id === fixedTaskId ? { ...f, startTime: newStartTime, endTime: newEndTime } : f));
@@ -596,6 +945,9 @@ export default function FlowStateCalendar({
   });
 
   events.forEach(e => {
+    if (e.connectedTaskId && tasks.some(t => t.id === e.connectedTaskId)) {
+      return;
+    }
     visualItems.push({
       id: `e-${e.id}`,
       type: 'event',
@@ -611,9 +963,15 @@ export default function FlowStateCalendar({
   tasks.forEach(t => {
     if (t.scheduledTime) {
       const sMin = timeToMinutes(t.scheduledTime);
-      const duration = t.microSteps && t.microSteps.length > 0 
-        ? t.microSteps.reduce((sum, ms) => sum + (ms.estimatedMinutes || 20), 0)
-        : 60;
+      const matchingEvent = events.find(e => e.connectedTaskId === t.id);
+      let duration = 60;
+      if (matchingEvent) {
+        duration = timeToMinutes(matchingEvent.endTime) - timeToMinutes(matchingEvent.startTime);
+      } else {
+        duration = t.microSteps && t.microSteps.length > 0 
+          ? t.microSteps.reduce((sum, ms) => sum + (ms.estimatedMinutes || 20), 0)
+          : 60;
+      }
       const eMin = sMin + duration;
       visualItems.push({
         id: `t-${t.id}`,
@@ -751,6 +1109,31 @@ export default function FlowStateCalendar({
             </button>
           </div>
         </div>
+
+        {/* Dynamic AI Conflict Alert Banner */}
+        {conflicts.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-3.5 mb-4 space-y-2 animate-fade-in shadow-xs shrink-0">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2">
+                <span className="text-sm shrink-0 select-none">⚠️</span>
+                <div>
+                  <strong className="text-xs text-amber-850 font-bold block">Schedule Conflict Detected!</strong>
+                  <p className="text-[10px] text-amber-750 leading-relaxed font-semibold">
+                    You have {conflicts.length} overlapping block{conflicts.length > 1 ? 's' : ''} on your schedule (e.g. {conflicts[0].item1.title} overlaps with {conflicts[0].item2.title}).
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleStartAiReschedule}
+                className="shrink-0 bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-1.5 rounded-lg text-[10px] cursor-pointer transition-colors flex items-center gap-1 shadow-xs font-mono tracking-wide"
+              >
+                <Sparkles className="w-3 h-3 text-blue-400 animate-pulse" />
+                <span>RESCHEDULE WITH AI</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Google Calendar Column Header Day Bubble */}
         <div className="flex items-center pl-16 border-b border-slate-100 pb-3 mb-2 shrink-0">
@@ -1919,6 +2302,151 @@ export default function FlowStateCalendar({
 
               </div>
             </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* AI Reschedule Triage Modal */}
+      {isAiRescheduleModalOpen && (
+        <div id="ai-reschedule-modal" className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[90vh] overflow-y-auto scrollbar-thin relative p-6 space-y-4">
+            
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-blue-600 animate-pulse" />
+                <h3 className="text-sm font-bold font-display text-slate-800">AI Intelligent Rescheduler</h3>
+              </div>
+              <button
+                onClick={() => setIsAiRescheduleModalOpen(false)}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold p-1.5 rounded-full cursor-pointer transition-all w-7 h-7 flex items-center justify-center text-xs"
+                title="Close rescheduling helper"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Error Message */}
+            {aiRescheduleError && (
+              <div className="bg-rose-50 border border-rose-100 rounded-xl p-3 text-xs text-rose-700 font-semibold">
+                {aiRescheduleError}
+              </div>
+            )}
+
+            {/* Loading State */}
+            {aiRescheduleLoading && (
+              <div className="flex flex-col items-center justify-center py-10 space-y-4 text-center">
+                <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                <div className="space-y-1">
+                  <p className="text-xs font-bold text-slate-700">Recalibrating circadian schedule...</p>
+                  <p className="text-[10px] text-slate-400 font-medium font-mono uppercase tracking-wider">
+                    Analyzing locked meetings, OOO times, and morning standup briefing
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Success Results State */}
+            {!aiRescheduleLoading && aiRescheduleResult && (
+              <div className="space-y-4">
+                
+                {/* Coaching Explanation */}
+                {aiRescheduleResult.coachingSummary && (
+                  <div className="bg-blue-50/50 border border-blue-100/80 p-3.5 rounded-xl text-xs font-sans">
+                    <span className="text-[9px] font-bold text-blue-700 uppercase tracking-widest block mb-1">AI Optimized Coaching Strategy</span>
+                    <p className="text-slate-700 leading-relaxed font-semibold font-sans">{aiRescheduleResult.coachingSummary}</p>
+                  </div>
+                )}
+
+                {/* Proposed Changes list */}
+                <div className="space-y-2">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Proposed Daily Realignment</span>
+                  <div className="border border-slate-150 rounded-xl divide-y divide-slate-100 max-h-48 overflow-y-auto p-1 text-xs">
+                    
+                    {/* Tasks updates */}
+                    {aiRescheduleResult.updatedTasks && aiRescheduleResult.updatedTasks.length > 0 ? (
+                      aiRescheduleResult.updatedTasks.map((ut) => {
+                        const originalTask = tasks.find(t => t.id === ut.id);
+                        if (!originalTask) return null;
+                        return (
+                          <div key={ut.id} className="p-2 flex items-center justify-between text-xxs">
+                            <span className="font-bold text-slate-700 truncate max-w-[60%]">{originalTask.title}</span>
+                            <div className="flex items-center gap-1 font-mono text-slate-500 font-semibold">
+                              <span className="line-through">{originalTask.scheduledTime || 'Unscheduled'}</span>
+                              <span>➔</span>
+                              <span className="text-blue-600 font-bold">{ut.scheduledTime}</span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : null}
+
+                    {/* Events updates */}
+                    {aiRescheduleResult.updatedEvents && aiRescheduleResult.updatedEvents.length > 0 ? (
+                      aiRescheduleResult.updatedEvents.map((ue) => {
+                        const originalEvent = events.find(e => e.id === ue.id);
+                        if (!originalEvent) return null;
+                        const isChanged = originalEvent.startTime !== ue.startTime || originalEvent.endTime !== ue.endTime;
+                        if (!isChanged) return null;
+                        return (
+                          <div key={ue.id} className="p-2 flex items-center justify-between text-xxs">
+                            <span className="font-bold text-slate-700 truncate max-w-[60%]">{ue.title}</span>
+                            <div className="flex items-center gap-1 font-mono text-slate-500 font-semibold">
+                              <span className="line-through">{originalEvent.startTime} - {originalEvent.endTime}</span>
+                              <span>➔</span>
+                              <span className="text-emerald-600 font-bold">{ue.startTime} - {ue.endTime}</span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : null}
+                  </div>
+                </div>
+
+                {/* Mandatory Consent/Authorization for Next Day Tasks */}
+                {showNextDayConsent && aiRescheduleResult.nextDayTasks && aiRescheduleResult.nextDayTasks.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-4 space-y-3">
+                    <div className="flex items-start gap-2 text-amber-850">
+                      <span className="text-sm shrink-0">⚠️</span>
+                      <div className="space-y-1">
+                        <strong className="text-xs font-bold block">Next-Day Postponement Authorization Required</strong>
+                        <p className="text-[10px] text-amber-750 leading-relaxed font-semibold">
+                          Due to busy blocks, the following task(s) cannot fit on today's timeline and are proposed to move to the next day backlog. Do you authorize this?
+                        </p>
+                      </div>
+                    </div>
+
+                    <ul className="list-disc pl-5 space-y-2 text-xxs text-amber-900 font-bold">
+                      {aiRescheduleResult.nextDayTasks.map(t => (
+                        <li key={t.id}>
+                          <span>{t.title}</span>
+                          <span className="block text-[9px] text-amber-600 font-normal mt-0.5 font-sans">Reason: {t.reason}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex gap-2.5 pt-3 border-t border-slate-100">
+                  <button
+                    onClick={() => setIsAiRescheduleModalOpen(false)}
+                    className="flex-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 font-bold py-2.5 rounded-xl text-xs transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleApplyAiReschedule}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/10 cursor-pointer"
+                  >
+                    <Check className="w-3.5 h-3.5 text-white" />
+                    <span>Authorize & Apply Schedule</span>
+                  </button>
+                </div>
+
+              </div>
+            )}
 
           </div>
         </div>

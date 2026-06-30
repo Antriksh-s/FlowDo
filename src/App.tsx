@@ -1245,10 +1245,9 @@ export default function App() {
     return (eh * 60 + em) - (sh * 60 + sm);
   };
 
-  const predefinedDailyMinutes = fixedTasks.reduce((sum, ft) => sum + getFixedTaskDuration(ft), 0);
   const plannedTaskMinutes = tasks.filter(t => t.status !== 'completed').reduce((sum, t) => sum + getTaskDuration(t), 0);
   const totalCapacityMinutes = workingHours * 60;
-  const capacityRemainingMinutes = Math.max(0, totalCapacityMinutes - plannedTaskMinutes - predefinedDailyMinutes);
+  const capacityRemainingMinutes = Math.max(0, totalCapacityMinutes - plannedTaskMinutes);
   const capacityPercentRemaining = Math.max(0, Math.min(100, Math.round((capacityRemainingMinutes / totalCapacityMinutes) * 100)));
 
   // Helper to check if a task falls within the specified halt range
@@ -1901,7 +1900,7 @@ export default function App() {
   }
 
   return (
-    <div id="flowdo-root-app" className="min-h-screen pb-12 bg-slate-50 text-slate-900 flex flex-col relative selection:bg-blue-500/20 selection:text-blue-700">
+    <div id="flowdo-root-app" className="min-h-screen pb-12 bg-slate-50 text-slate-900 flex flex-col relative overflow-y-auto h-auto selection:bg-blue-500/20 selection:text-blue-700">
       {/* Background Task File Stack Animation Backdrop */}
       <TaskFileStack tasks={tasks} />
 
@@ -2097,7 +2096,7 @@ export default function App() {
       </header>
 
       {/* Main Container Area */}
-      <main id="app-main-content" className="flex-1 p-6 max-w-full mx-auto w-full flex flex-col gap-6 min-h-0">
+      <main id="app-main-content" className="flex-1 p-6 max-w-full mx-auto w-full flex flex-col gap-6 h-auto min-h-fit overflow-y-visible">
         {/* Morning Triage Modal Dialog */}
         {isTriageOpen && (
           <div id="morning-triage-modal" className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
@@ -2971,8 +2970,6 @@ export default function App() {
                       <span className="text-blue-600">Capacity left ({capacityPercentRemaining}%)</span>
                       <span>=</span>
                       <span>Budget ({(totalCapacityMinutes / 60).toFixed(1)}h)</span>
-                      <span>-</span>
-                      <span className="text-indigo-600">Predefined ({(predefinedDailyMinutes / 60).toFixed(1)}h)</span>
                       <span>-</span>
                       <span className="text-rose-600">Tasks ({(plannedTaskMinutes / 60).toFixed(1)}h)</span>
                     </div>

@@ -438,6 +438,9 @@ export default function MorningStandup({
               type="button"
               id="apply-standup-btn"
               onClick={() => {
+                if (transcript) {
+                  localStorage.setItem('flow_morning_triage_context', transcript);
+                }
                 onApplyReorganization(
                   analyzedResults.updatedTasks,
                   analyzedResults.updatedEvents,
