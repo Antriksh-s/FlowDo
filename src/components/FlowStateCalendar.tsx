@@ -80,6 +80,7 @@ export default function FlowStateCalendar({
   };
 
   const [circadianOptimized, setCircadianOptimized] = useState(true);
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [schedulingTime, setSchedulingTime] = useState<string | null>(null);
   const [quickTaskTitle, setQuickTaskTitle] = useState('');
   const [isListening, setIsListening] = useState(false);
@@ -697,30 +698,41 @@ export default function FlowStateCalendar({
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 p-0.5 rounded-lg">
               <button
-                onClick={() => setSimulatedHour(wakeHour)}
+                onClick={() => {
+                  setSelectedDate(new Date());
+                  setSimulatedHour(wakeHour);
+                }}
                 className="px-2.5 py-1 text-xs font-semibold rounded-md text-slate-700 hover:bg-white hover:shadow-sm transition-all cursor-pointer"
-                title="Reset simulation to wakeup hour"
+                title="Reset to today's date"
               >
                 Today
               </button>
               <div className="h-4 w-[1px] bg-slate-200 my-auto"></div>
               <button
-                onClick={() => setSimulatedHour(Math.max(wakeHour, simulatedHour - 1))}
+                onClick={() => {
+                  const prevDay = new Date(selectedDate);
+                  prevDay.setDate(prevDay.getDate() - 1);
+                  setSelectedDate(prevDay);
+                }}
                 className="p-1 text-slate-600 hover:bg-white hover:shadow-sm rounded-md transition-all cursor-pointer font-bold text-xs"
-                title="Go back 1 hour"
+                title="Go back 1 day"
               >
                 ‹
               </button>
               <button
-                onClick={() => setSimulatedHour(Math.min(wakeHour + 14, simulatedHour + 1))}
+                onClick={() => {
+                  const nextDay = new Date(selectedDate);
+                  nextDay.setDate(nextDay.getDate() + 1);
+                  setSelectedDate(nextDay);
+                }}
                 className="p-1 text-slate-600 hover:bg-white hover:shadow-sm rounded-md transition-all cursor-pointer font-bold text-xs"
-                title="Go forward 1 hour"
+                title="Go forward 1 day"
               >
                 ›
               </button>
             </div>
             <span className="text-sm font-extrabold text-slate-800 font-display">
-              {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+              {selectedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
             </span>
           </div>
 
@@ -744,10 +756,10 @@ export default function FlowStateCalendar({
         <div className="flex items-center pl-16 border-b border-slate-100 pb-3 mb-2 shrink-0">
           <div className="flex flex-col items-center">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              {new Date().toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase()}
+              {selectedDate.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase()}
             </span>
             <span className="w-8 h-8 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-md mt-0.5 shadow-blue-500/15">
-              {new Date().getDate()}
+              {selectedDate.getDate()}
             </span>
           </div>
           <span className="ml-4 text-xxs text-slate-400 font-semibold tracking-wider uppercase font-mono bg-slate-50 border border-slate-150 px-2 py-0.5 rounded-md">
@@ -1690,7 +1702,7 @@ export default function FlowStateCalendar({
                 {/* Calendar details badge */}
                 <div className="hidden sm:flex items-center pl-4 border-l border-slate-200">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">
-                    {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                    {selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                   </span>
                 </div>
                 
