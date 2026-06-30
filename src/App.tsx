@@ -1198,7 +1198,8 @@ export default function App() {
               startTime: m.startTime,
               endTime: m.endTime,
               type: 'task',
-              energyImpact: 'neutral'
+              energyImpact: 'neutral',
+              connectedTaskId: m.connectedTaskId || m.id
             });
           }
         }
@@ -1333,43 +1334,118 @@ export default function App() {
     triggerToast(`Added custom routine block: ${title}`);
   };
 
-  // Callback for OOO Halt - Option A: Ignore and shift to next available hours
+  // Callback for OOO Halt - Option A: Ignore and shift to next available hours preserving chronological sequence and dependencies!
   const handleShiftOverHalt = (start: number, end: number) => {
-    const shiftAmount = end - start;
-    setTasks(prev => prev.map(task => {
-      if (task.scheduledTime) {
-        const hr = parseInt(task.scheduledTime.split(':')[0], 10);
-        const min = task.scheduledTime.split(':')[1] || '00';
-        if (hr >= start && hr < end) {
-          const newHr = hr + shiftAmount;
-          const finalHr = newHr >= 24 ? (newHr - 24) : newHr;
-          return {
-            ...task,
-            scheduledTime: `${finalHr.toString().padStart(2, '0')}:${min}`
-          };
-        }
-      }
-      return task;
-    }));
+    const parseTimeToMinutes = (tStr: string) => {
+      const [h, m] = tStr.split(':').map(Number);
+      return (isNaN(h) ? 0 : h) * 60 + (isNaN(m) ? 0 : m);
+    };
 
-    setEvents(prev => {
-      const shifted = prev.map(evt => {
-        if (evt.startTime) {
-          const hr = parseInt(evt.startTime.split(':')[0], 10);
-          const min = evt.startTime.split(':')[1] || '00';
-          if (hr >= start && hr < end) {
-            const newHr = hr + shiftAmount;
-            const finalHr = newHr >= 24 ? (newHr - 24) : newHr;
-            const duration = parseInt(evt.endTime.split(':')[0], 10) - hr || 1;
-            const finalEndHr = (finalHr + duration) >= 24 ? 23 : (finalHr + duration);
-            return {
-              ...evt,
-              startTime: `${finalHr.toString().padStart(2, '0')}:${min}`,
-              endTime: `${finalEndHr.toString().padStart(2, '0')}:00`
-            };
+    const minutesToTime = (m: number) => {
+      const h = Math.floor(m / 60) % 24;
+      const mins = m % 60;
+      return `${h.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+    };
+
+    const haltStartMin = start * 60;
+    const haltEndMin = end * 60;
+
+    // Collect all active, scheduled items to schedule today (excluding completed tasks and routine/OOO events themselves)
+    const scheduledTasks = tasks.filter(t => t.scheduledTime && t.status !== 'completed');
+    // Meetings / custom events that might be shifted (excluding existing OOO blocks)
+    const activeEvents = events.filter(e => e.startTime && !e.title.includes('Out of Office') && !e.title.includes('🛑'));
+
+    const itemsToSchedule = [
+      ...scheduledTasks.map(t => ({
+        id: t.id,
+        type: 'task' as const,
+        title: t.title,
+        duration: t.microSteps && t.microSteps.length > 0
+          ? t.microSteps.reduce((sum, ms) => sum + (ms.estimatedMinutes || 20), 0)
+          : 60,
+        originalStartMin: parseTimeToMinutes(t.scheduledTime!),
+        originalItem: t
+      })),
+      ...activeEvents.map(e => ({
+        id: e.id,
+        type: 'event' as const,
+        title: e.title,
+        duration: parseTimeToMinutes(e.endTime) - parseTimeToMinutes(e.startTime),
+        originalStartMin: parseTimeToMinutes(e.startTime),
+        originalItem: e
+      }))
+    ];
+
+    // Sort items by their original scheduled start time to preserve relative sequence!
+    // This absolutely guarantees that if Item A was scheduled before Item B originally,
+    // (e.g. "prepare report before meeting with boss"), that sequencing constraint is strictly preserved.
+    itemsToSchedule.sort((a, b) => a.originalStartMin - b.originalStartMin);
+
+    let currentPointer = wakeHour * 60;
+    const updatedTaskMap: Record<string, string> = {};
+    const updatedEventMap: Record<string, { startTime: string; endTime: string }> = {};
+
+    for (const item of itemsToSchedule) {
+      const duration = item.duration;
+      let slotStart = Math.max(currentPointer, item.originalStartMin);
+      let found = false;
+
+      while (!found && slotStart < 24 * 60) {
+        const slotEnd = slotStart + duration;
+
+        // Check if overlaps with OOO Halt [haltStartMin, haltEndMin]
+        const overlapOOO = slotStart < haltEndMin && slotEnd > haltStartMin;
+
+        // Check if overlaps with any locked fixed routines
+        const overlapFixed = fixedTasks.some(ft => {
+          const ftStart = parseTimeToMinutes(ft.startTime);
+          const ftEnd = parseTimeToMinutes(ft.endTime);
+          return slotStart < ftEnd && slotEnd > ftStart;
+        });
+
+        if (!overlapOOO && !overlapFixed) {
+          found = true;
+          const formattedStart = minutesToTime(slotStart);
+          const formattedEnd = minutesToTime(slotEnd);
+          
+          if (item.type === 'task') {
+            updatedTaskMap[item.id] = formattedStart;
+          } else {
+            updatedEventMap[item.id] = { startTime: formattedStart, endTime: formattedEnd };
+          }
+          currentPointer = slotEnd; // next item must start after this one ends to prevent overlap
+        } else {
+          if (overlapOOO) {
+            slotStart = haltEndMin; // Fast-forward directly past the OOO block
+          } else {
+            slotStart += 15; // slide by 15 mins to search
           }
         }
-        return evt;
+      }
+    }
+
+    // Apply the smart shifted times to tasks state
+    setTasks(prev => prev.map(t => {
+      if (updatedTaskMap[t.id]) {
+        return {
+          ...t,
+          scheduledTime: updatedTaskMap[t.id]
+        };
+      }
+      return t;
+    }));
+
+    // Apply the smart shifted times to events state and append the new Halt event
+    setEvents(prev => {
+      const shifted = prev.map(e => {
+        if (updatedEventMap[e.id]) {
+          return {
+            ...e,
+            startTime: updatedEventMap[e.id].startTime,
+            endTime: updatedEventMap[e.id].endTime
+          };
+        }
+        return e;
       });
 
       const haltEvent: CalendarEvent = {
@@ -1383,7 +1459,7 @@ export default function App() {
       return [...shifted, haltEvent];
     });
 
-    triggerToast(`Emergency OOO Halt applied! Shifting affected work blocks to next available slots after ${end}:00.`);
+    triggerToast(`⚡ Emergency OOO Halt applied! Shifting affected blocks with smart sequence preservation: Pre-requisites and meetings are chronologically ordered.`);
     setIsPreferencesOpen(false);
   };
 
