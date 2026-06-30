@@ -1,0 +1,6 @@
+{
+  "name": "FlowDo",
+  "description": "A hybrid AI productivity companion combining the autonomous Do Engine with energy-aware FlowState calendar scheduling.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
