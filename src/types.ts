@@ -57,3 +57,16 @@ export interface AgentLog {
   timestamp: string;
   type: 'info' | 'success' | 'working' | 'alert';
 }
+
+export interface EveningReflection {
+  id: string;
+  date: string; // ISO date string "YYYY-MM-DD"
+  timestamp: number;
+  rating: number; // 1-5 rating
+  challenges: string[]; // Selectable chips: e.g. ["distracted", "fatigue"]
+  rawInput: string; // Free text how his day went
+  completedTaskIds: string[];
+  uncompletedTaskIds: string[];
+  coachingFeedback?: string; // AI generated suggestions
+}
+

@@ -347,6 +347,12 @@ function timeToMinutes(timeStr: string): number {
   return h * 60 + m;
 }
 
+function minutesToTime(minutes: number): string {
+  const h = Math.floor(minutes / 60) % 24;
+  const m = minutes % 60;
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+}
+
 function checkOverlap(startTimeStr: string, durationMinutes: number, fixedTasks: any[], events: any[]) {
   const start = timeToMinutes(startTimeStr);
   const end = start + durationMinutes;
@@ -693,8 +699,64 @@ ${correctivePrompt}`;
   res.json(finalTask);
 });
 
+app.post('/api/evening-reflection', async (req, res) => {
+  const { rating, challenges = [], rawInput = '', completedTasks = [], uncompletedTasks = [] } = req.body;
+
+  const clientProvider = (req.headers['x-ai-provider'] || 'gemini') as 'gemini' | 'openai' | 'anthropic' | 'deepseek';
+  const clientGeminiKey = req.headers['x-gemini-api-key'] as string;
+  const clientAnthropicKey = req.headers['x-anthropic-api-key'] as string;
+  const clientDeepseekKey = req.headers['x-deepseek-api-key'] as string;
+
+  const activeProvider = clientProvider === 'openai' ? 'gemini' : clientProvider;
+
+  const apiKeys = {
+    gemini: (clientGeminiKey && clientGeminiKey.trim() !== 'MY_GEMINI_API_KEY' && clientGeminiKey.trim() !== '') ? clientGeminiKey.trim() : (process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || geminiApiKey),
+    anthropic: (clientAnthropicKey && clientAnthropicKey.trim() !== '') ? clientAnthropicKey.trim() : process.env.ANTHROPIC_API_KEY,
+    deepseek: (clientDeepseekKey && clientDeepseekKey.trim() !== '') ? clientDeepseekKey.trim() : process.env.DEEPSEEK_API_KEY,
+  };
+
+  const isAiAvailable = (activeProvider === 'gemini' && !!apiKeys.gemini && apiKeys.gemini !== 'MY_GEMINI_API_KEY') ||
+                        (activeProvider === 'anthropic' && !!apiKeys.anthropic) ||
+                        (activeProvider === 'deepseek' && !!apiKeys.deepseek);
+
+  if (!isAiAvailable) {
+    const defaultFeedback = `Good job reflecting on your day! ${
+      challenges.length > 0 ? `To bypass your noted challenges (${challenges.join(', ')}), try building in 15-minute buffers after core intensive work blocks tomorrow.` : "Keep up the fantastic focus momentum!"
+    }`;
+    return res.json({ feedback: defaultFeedback });
+  }
+
+  try {
+    const systemInstruction = `You are a warm, professional, high-performance Focus Coach.
+The user is filling out their Evening Standup. Your goal is to analyze their day, offer highly actionable cognitive strategies, and explain how they can adjust their schedule tomorrow to avoid their specific challenges.
+
+Keep your response to 2-3 sentences. It must be encouraging, clear, and highly focused on feedforward actions.`;
+
+    const prompt = `Today's Metrics:
+Rating: ${rating}/5
+Focus/Energy Challenges: ${challenges.join(', ')}
+User's Reflection notes: "${rawInput}"
+Completed Tasks: ${completedTasks.join(', ') || 'None'}
+Remaining Tasks: ${uncompletedTasks.join(', ') || 'None'}
+
+Provide personalized coaching feedback. Mention how they can adjust their calendar tomorrow to sidestep these specific pitfalls.`;
+
+    const responseText = await callLlm({
+      provider: activeProvider,
+      systemInstruction,
+      prompt,
+      apiKeys,
+    });
+
+    res.json({ feedback: responseText.trim() });
+  } catch (err) {
+    console.error("Evening reflection API error:", err);
+    res.status(500).json({ error: "Failed to generate coaching suggestions." });
+  }
+});
+
 app.post('/api/refine-schedule', async (req, res) => {
-  const { tasks = [], events = [], fixedTasks = [], userPrompt, habitProfile = [], wakeHour = 7, dailyAiCallsCount } = req.body;
+  const { tasks = [], events = [], fixedTasks = [], userPrompt, habitProfile = [], wakeHour = 7, dailyAiCallsCount, pastReflections = [] } = req.body;
   if (!userPrompt) {
     return res.status(400).json({ error: 'User prompt is required' });
   }
@@ -772,13 +834,16 @@ app.post('/api/refine-schedule', async (req, res) => {
       detectedPattern = "Insert a 30-minute buffer block after high-drain events";
     }
 
+    const coachingSummary = `I have adjusted your schedule! ${matchedTask ? `"${matchedTask.title}"` : 'Your strategic task'} has been scheduled at ${targetTime} to match your peak cognitive energy window, right after your morning routines.`;
+
     return res.json({
       updatedTasks,
       updatedEvents: events.map((e: any) => {
         const updated = updatedEvents.find((ue: any) => ue.id === e.id);
         return updated ? { ...e, startTime: updated.startTime, endTime: updated.endTime, title: updated.title } : e;
       }),
-      detectedPattern
+      detectedPattern,
+      coachingSummary
     });
   }
 
@@ -788,9 +853,9 @@ app.post('/api/refine-schedule', async (req, res) => {
     let parsed: any = null;
     let correctivePrompt = '';
 
-      while (attempt < retries) {
-        attempt++;
-        const systemInstruction = `You are the Core Schedule Adjustment Agent.
+    while (attempt < retries) {
+      attempt++;
+      const systemInstruction = `You are the Core Schedule Adjustment Agent.
 The user wants to adjust their daily focus schedule.
 
 Strict Hierarchy for adjusting:
@@ -807,116 +872,188 @@ Current Tasks to schedule:
 ${JSON.stringify(tasks.map((t: any) => ({ id: t.id, title: t.title, scheduledTime: t.scheduledTime, duration: 60 })))}
 
 Current Scheduled Events:
-${JSON.stringify(events.map((e: any) => ({ id: e.id, title: e.title, startTime: e.startTime, endTime: e.endTime })))}
+${JSON.stringify(events.map((e: any) => ({ id: e.id, title: e.title, startTime: e.startTime, endTime: e.endTime, connectedTaskId: e.connectedTaskId })))}
+
+${pastReflections && pastReflections.length > 0 ? `
+Historical Focus Challenges & Reflections Memory:
+${JSON.stringify(pastReflections.slice(-5).map((r: any) => ({
+  date: r.date,
+  rating: r.rating,
+  challenges: r.challenges,
+  rawInput: r.rawInput
+})))}
+
+CRITICAL ADAPTATION DIRECTIVE:
+Analyze the past challenges above (such as fatigue, distraction slumps, underestimating duration, meeting overloads).
+When adjusting/scheduling:
+- Proactively leave buffer blocks or move high-energy tasks away from times where they noted "Afternoon Energy Slump" or "Social Media / Distraction".
+- If they tend to underestimate task durations, expand task allocations by 15-30 minutes.
+- Explicitly mention in the coachingSummary how you have used this memory to sidestep their past challenges (e.g., "Given your previous logs showing fatigue in the afternoon, I rescheduled your strategy slot...").
+` : ''}
 
 ${correctivePrompt}
 
 In addition to shifting the schedule:
-Evaluate the user's request. Does this adjustment reveal an underlying habit, fatigue pattern, or preference (e.g., "Move my coding block to the evening" implies they prefer late focus)? If a clear behavioral rule is detected, extract it as a single, clean, human-readable behavioral rule/tip (e.g. "Move heavy coding blocks to evenings when cognitive peak shifts" or "Keep a rest slot right after intensive meetings"). If no pattern is detected, set "detectedPattern" to null.
+1. Evaluate the user's request. Does this adjustment reveal an underlying habit, fatigue pattern, or preference (e.g., "Move my coding block to the evening" implies they prefer late focus)? If a clear behavioral rule is detected, extract it as a single, clean, human-readable behavioral rule/tip (e.g. "Move heavy coding blocks to evenings when cognitive peak shifts" or "Keep a rest slot right after intensive meetings"). If no pattern is detected, set "detectedPattern" to null.
+2. Provide a conversational, encouraging coaching summary explaining what changes you made, why they fit their circadian peak/energy profile (or why they are helpful), and some friendly motivational tips for focus. Keep it to 2-3 sentences max.
+3. If the user mentions a new task or event to add, you can create a new ID (e.g. "t-dyn-" followed by a timestamp/random string) and return it in "updatedTasks" or "updatedEvents" with its "title" and "description" fields.
 
 You must return a JSON response matching this schema:
 {
   "updatedTasks": [
-    { "id": "t-id", "scheduledTime": "HH:MM" }
+    { "id": "t-id", "scheduledTime": "HH:MM", "title": "Optional new task title", "description": "Optional new task description" }
   ],
   "updatedEvents": [
     { "id": "e-id", "startTime": "HH:MM", "endTime": "HH:MM", "title": "Updated Title" }
   ],
-  "detectedPattern": "Extracted behavioral rule or null"
+  "detectedPattern": "Extracted behavioral rule or null",
+  "coachingSummary": "A friendly, brief coaching briefing of the schedule realignment."
 }`;
 
-        const prompt = `Adjust the schedule based on user instruction: "${userPrompt}"`;
+      const prompt = `Adjust the schedule based on user instruction: "${userPrompt}"`;
 
-        const responseText = await callLlm({
-          provider: activeProvider,
-          systemInstruction,
-          prompt,
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              updatedTasks: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    id: { type: Type.STRING },
-                    scheduledTime: { type: Type.STRING },
-                  },
-                  required: ['id', 'scheduledTime'],
+      const responseText = await callLlm({
+        provider: activeProvider,
+        systemInstruction,
+        prompt,
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            updatedTasks: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  scheduledTime: { type: Type.STRING },
+                  title: { type: Type.STRING, description: 'Optional new task title' },
+                  description: { type: Type.STRING, description: 'Optional new task description' }
                 },
+                required: ['id', 'scheduledTime'],
               },
-              updatedEvents: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    id: { type: Type.STRING },
-                    startTime: { type: Type.STRING },
-                    endTime: { type: Type.STRING },
-                    title: { type: Type.STRING },
-                  },
-                  required: ['id', 'startTime', 'endTime', 'title'],
-                },
-              },
-              detectedPattern: { type: Type.STRING, description: 'A short string behavioral rule, or null' },
             },
-            required: ['updatedTasks', 'updatedEvents', 'detectedPattern'],
+            updatedEvents: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  startTime: { type: Type.STRING },
+                  endTime: { type: Type.STRING },
+                  title: { type: Type.STRING },
+                },
+                required: ['id', 'startTime', 'endTime', 'title'],
+              },
+            },
+            detectedPattern: { type: Type.STRING, description: 'A short string behavioral rule, or null' },
+            coachingSummary: { type: Type.STRING, description: 'Brief explanation of changes and focus coaching' }
           },
-          apiKeys,
-        });
+          required: ['updatedTasks', 'updatedEvents', 'detectedPattern', 'coachingSummary'],
+        },
+        apiKeys,
+      });
 
-        let cleanText = responseText.trim();
-        if (cleanText.startsWith('```json')) {
-          cleanText = cleanText.replace(/^```json/, '').replace(/```$/, '').trim();
-        } else if (cleanText.startsWith('```')) {
-          cleanText = cleanText.replace(/^```/, '').replace(/```$/, '').trim();
+      let cleanText = responseText.trim();
+      if (cleanText.startsWith('```json')) {
+        cleanText = cleanText.replace(/^```json/, '').replace(/```$/, '').trim();
+      } else if (cleanText.startsWith('```')) {
+        cleanText = cleanText.replace(/^```/, '').replace(/```$/, '').trim();
+      }
+      parsed = JSON.parse(cleanText);
+
+      // Post-processing: Bi-directional synchronization between updatedTasks and updatedEvents
+      const finalUpdatedTasks = [...(parsed.updatedTasks || [])];
+      const finalUpdatedEvents = [...(parsed.updatedEvents || [])];
+
+      // 1. Sync Task reschedules to their connected Calendar Events
+      for (const ut of parsed.updatedTasks || []) {
+        const connectedEvt = events.find((e: any) => e.connectedTaskId === ut.id);
+        if (connectedEvt) {
+          const alreadyInEvents = finalUpdatedEvents.find((ue: any) => ue.id === connectedEvt.id);
+          const origDuration = Math.max(30, timeToMinutes(connectedEvt.endTime) - timeToMinutes(connectedEvt.startTime));
+          const newStart = ut.scheduledTime;
+          const newEnd = minutesToTime(timeToMinutes(newStart) + origDuration);
+          
+          if (alreadyInEvents) {
+            alreadyInEvents.startTime = newStart;
+            alreadyInEvents.endTime = newEnd;
+          } else {
+            finalUpdatedEvents.push({
+              id: connectedEvt.id,
+              startTime: newStart,
+              endTime: newEnd,
+              title: connectedEvt.title
+            });
+          }
         }
-        parsed = JSON.parse(cleanText);
+      }
 
-        // Validation loop: check if any updatedTask or updatedEvent overlaps with fixedTasks
-        let hasOverlap = false;
-        let overlapDetails = '';
+      // 2. Sync Event reschedules to their connected Tasks
+      for (const ue of parsed.updatedEvents || []) {
+        const sourceEvt = events.find((e: any) => e.id === ue.id);
+        if (sourceEvt && sourceEvt.connectedTaskId) {
+          const alreadyInTasks = finalUpdatedTasks.find((ut: any) => ut.id === sourceEvt.connectedTaskId);
+          if (alreadyInTasks) {
+            alreadyInTasks.scheduledTime = ue.startTime;
+          } else {
+            finalUpdatedTasks.push({
+              id: sourceEvt.connectedTaskId,
+              scheduledTime: ue.startTime
+            });
+          }
+        }
+      }
 
-        for (const ut of parsed.updatedTasks || []) {
-          // find full task info for duration
-          const taskInfo = tasks.find((t: any) => t.id === ut.id);
-          const duration = taskInfo ? taskInfo.microSteps?.reduce((acc: number, step: any) => acc + (step.estimatedMinutes || 20), 0) || 60 : 60;
-          const overlap = checkOverlap(ut.scheduledTime, duration, fixedTasks, []);
+      parsed.updatedTasks = finalUpdatedTasks;
+      parsed.updatedEvents = finalUpdatedEvents;
+
+      // Validation loop: check if any updatedTask or updatedEvent overlaps with fixedTasks
+      let hasOverlap = false;
+      let overlapDetails = '';
+
+      for (const ut of parsed.updatedTasks || []) {
+        // find full task info for duration
+        const taskInfo = tasks.find((t: any) => t.id === ut.id);
+        const duration = taskInfo ? taskInfo.microSteps?.reduce((acc: number, step: any) => acc + (step.estimatedMinutes || 20), 0) || 60 : 60;
+        const overlap = checkOverlap(ut.scheduledTime, duration, fixedTasks, []);
+        if (overlap) {
+          hasOverlap = true;
+          overlapDetails = `Task "${taskInfo?.title || ut.id}" rescheduled to ${ut.scheduledTime} overlaps with locked block "${overlap.title}" (${overlap.startTime} - ${overlap.endTime})`;
+          break;
+        }
+      }
+
+      if (!hasOverlap) {
+        for (const ue of parsed.updatedEvents || []) {
+          const duration = timeToMinutes(ue.endTime) - timeToMinutes(ue.startTime);
+          const overlap = checkOverlap(ue.startTime, duration > 0 ? duration : 60, fixedTasks, []);
           if (overlap) {
             hasOverlap = true;
-            overlapDetails = `Task "${taskInfo?.title || ut.id}" rescheduled to ${ut.scheduledTime} overlaps with locked block "${overlap.title}" (${overlap.startTime} - ${overlap.endTime})`;
+            overlapDetails = `Event "${ue.title}" rescheduled to ${ue.startTime} - ${ue.endTime} overlaps with locked block "${overlap.title}" (${overlap.startTime} - ${overlap.endTime})`;
             break;
           }
         }
-
-        if (!hasOverlap) {
-          for (const ue of parsed.updatedEvents || []) {
-            const duration = timeToMinutes(ue.endTime) - timeToMinutes(ue.startTime);
-            const overlap = checkOverlap(ue.startTime, duration > 0 ? duration : 60, fixedTasks, []);
-            if (overlap) {
-              hasOverlap = true;
-              overlapDetails = `Event "${ue.title}" rescheduled to ${ue.startTime} - ${ue.endTime} overlaps with locked block "${overlap.title}" (${overlap.startTime} - ${overlap.endTime})`;
-              break;
-            }
-          }
-        }
-
-        if (!hasOverlap) {
-          // Valid adjustment!
-          return res.json({
-            updatedTasks: parsed.updatedTasks,
-            // Re-merge with existing event data so we keep all non-time properties
-            updatedEvents: events.map((e: any) => {
-              const updated = parsed.updatedEvents?.find((ue: any) => ue.id === e.id);
-              return updated ? { ...e, startTime: updated.startTime, endTime: updated.endTime, title: updated.title } : e;
-            }),
-            detectedPattern: parsed.detectedPattern
-          });
-        } else {
-          console.warn(`[Adjustment Scheduler] Overlap detected on attempt ${attempt}: ${overlapDetails}. Retrying adjustment...`);
-          correctivePrompt = `CRITICAL WARNING: Your previous adjustment choice had an overlap with a locked calendar block: ${overlapDetails}. You MUST adjust the times so they never overlap with any fixed/routine tasks or locked iCal meetings.`;
-        }
       }
+
+      if (!hasOverlap) {
+        // Re-merge with existing event data so we keep all non-time properties, BUT do not lose newly-added events
+        const mergedEvents = events.map((e: any) => {
+          const updated = parsed.updatedEvents?.find((ue: any) => ue.id === e.id);
+          return updated ? { ...e, startTime: updated.startTime, endTime: updated.endTime, title: updated.title } : e;
+        });
+        const newEvents = (parsed.updatedEvents || []).filter((ue: any) => !events.some((e: any) => e.id === ue.id));
+
+        return res.json({
+          updatedTasks: parsed.updatedTasks,
+          updatedEvents: [...mergedEvents, ...newEvents],
+          detectedPattern: parsed.detectedPattern,
+          coachingSummary: parsed.coachingSummary
+        });
+      } else {
+        console.warn(`[Adjustment Scheduler] Overlap detected on attempt ${attempt}: ${overlapDetails}. Retrying adjustment...`);
+        correctivePrompt = `CRITICAL WARNING: Your previous adjustment choice had an overlap with a locked calendar block: ${overlapDetails}. You MUST adjust the times so they never overlap with any fixed/routine tasks or locked iCal meetings.`;
+      }
+    }
       return res.status(400).json({ error: 'AI adjustment could not find an overlap-free schedule after 3 attempts due to layout conflicts.' });
     } catch (err: any) {
       console.error('Error during schedule adjustment:', err);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, LayoutDashboard, Cpu, FileText, Zap, Battery, Sparkles, LogOut, CheckCircle, Info, Mic, Settings, User, Save, Check, Trash2, Plus, Minus, Clock, Brain, Lock } from 'lucide-react';
-import { Task, CalendarEvent, MicroStep, FixedTask } from './types';
+import { Calendar, LayoutDashboard, Cpu, FileText, Zap, Battery, Sparkles, LogOut, CheckCircle, Info, Mic, Settings, User, Save, Check, Trash2, Plus, Minus, Clock, Brain, Lock, Moon } from 'lucide-react';
+import { Task, CalendarEvent, MicroStep, FixedTask, EveningReflection } from './types';
 import { INITIAL_TASKS, INITIAL_CALENDAR_EVENTS, getEnergyForHour } from './data';
 import DoEngineWidget from './components/DoEngineWidget';
 import FlowStateCalendar from './components/FlowStateCalendar';
@@ -9,6 +9,8 @@ import FrictionlessWidget from './components/FrictionlessWidget';
 import FocusModeWidget from './components/FocusModeWidget';
 import TaskFileStack from './components/TaskFileStack';
 import FlowPup from './components/FlowPup';
+import GuestGuideWidget from './components/GuestGuideWidget';
+import EveningStandup from './components/EveningStandup';
 
 // Firebase Imports
 import { onAuthStateChanged, type User as FirebaseUser } from 'firebase/auth';
@@ -312,7 +314,13 @@ export default function App() {
     if (savedIcal && savedIcal.trim()) {
       return [];
     }
-    return INITIAL_CALENDAR_EVENTS;
+    const savedEvents = localStorage.getItem('flow_guest_events');
+    if (savedEvents) {
+      try {
+        return JSON.parse(savedEvents);
+      } catch (e) {}
+    }
+    return []; // Start empty for raw, clean guest workspace
   });
   const [wakeHour, setWakeHour] = useState<number>(() => {
     const saved = localStorage.getItem('flow_wake_hour');
@@ -326,11 +334,7 @@ export default function App() {
         return JSON.parse(saved);
       } catch (e) {}
     }
-    return [
-      { id: 'f1', title: '🍳 Breakfast & Energize', startTime: '08:00', endTime: '09:00' },
-      { id: 'f2', title: '🍽️ Lunch Break', startTime: '12:00', endTime: '13:00' },
-      { id: 'f3', title: '🏋️ Gym / Workout', startTime: '17:00', endTime: '18:00' }
-    ];
+    return []; // Start empty for raw, clean guest workspace
   });
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -339,6 +343,16 @@ export default function App() {
   const [showMetrics, setShowMetrics] = useState<boolean>(false);
   const [showSandbox, setShowSandbox] = useState<boolean>(false);
   const [isTriageOpen, setIsTriageOpen] = useState<boolean>(false);
+  const [isEveningStandupOpen, setIsEveningStandupOpen] = useState<boolean>(false);
+  const [reflections, setReflections] = useState<EveningReflection[]>(() => {
+    const saved = localStorage.getItem('flow_guest_reflections');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return [];
+  });
   const [isPreferencesOpen, setIsPreferencesOpen] = useState<boolean>(false);
   const [isEnergyCapacityModalOpen, setIsEnergyCapacityModalOpen] = useState<boolean>(false);
   const [resetInput, setResetInput] = useState<string>('');
@@ -559,10 +573,20 @@ export default function App() {
                 handleSyncICal(data.importedCalendarUrl);
               }
             }
+            if (data.calendarEvents) {
+              setEvents(data.calendarEvents);
+            } else if (!data.importedCalendarUrl || data.importedCalendarUrl.trim() === '') {
+              setEvents(INITIAL_CALENDAR_EVENTS);
+            }
             if (data.activeTasksList) {
               setTasks(data.activeTasksList);
             } else {
               setTasks([]);
+            }
+            if (data.reflections) {
+              setReflections(data.reflections);
+            } else {
+              setReflections([]);
             }
             try {
               const habitProfileDocRef = doc(db, 'users', user.uid, 'userdata', 'habitProfile');
@@ -632,13 +656,15 @@ export default function App() {
           fixedRoutineTasks: fixedTasks,
           importedCalendarUrl: icalUrl,
           activeTasksList: tasks,
+          calendarEvents: events,
           userName: userName,
           usage: usage,
           habitProfile: habitProfile,
           workingDays: workingDays,
           workingHours: workingHours,
           timezone: timezone,
-          isFlowPupEnabled: isFlowPupEnabled
+          isFlowPupEnabled: isFlowPupEnabled,
+          reflections: reflections
         }, { merge: true });
 
         // Also write to a separate habitProfile document
@@ -655,7 +681,7 @@ export default function App() {
     }, 1000);
 
     return () => clearTimeout(timeoutId);
-  }, [tasks, fixedTasks, wakeHour, icalUrl, currentUser, isDataLoaded, isNewUser, userName, usage, habitProfile, workingDays, workingHours, timezone, isFlowPupEnabled]);
+  }, [tasks, events, fixedTasks, wakeHour, icalUrl, currentUser, isDataLoaded, isNewUser, userName, usage, habitProfile, workingDays, workingHours, timezone, isFlowPupEnabled, reflections]);
 
   const handleSignOut = async () => {
     try {
@@ -752,9 +778,21 @@ export default function App() {
 
   useEffect(() => {
     if (!currentUser && enterAsGuest) {
+      localStorage.setItem('flow_guest_events', JSON.stringify(events));
+    }
+  }, [events, currentUser, enterAsGuest]);
+
+  useEffect(() => {
+    if (!currentUser && enterAsGuest) {
       localStorage.setItem('flow_wake_hour', wakeHour.toString());
     }
   }, [wakeHour, currentUser, enterAsGuest]);
+
+  useEffect(() => {
+    if (!currentUser && enterAsGuest) {
+      localStorage.setItem('flow_guest_reflections', JSON.stringify(reflections));
+    }
+  }, [reflections, currentUser, enterAsGuest]);
 
   useEffect(() => {
     localStorage.setItem('flow_user_name', userName);
@@ -1105,7 +1143,7 @@ export default function App() {
 
   // Triggered by Morning Triage "Apply"
   const handleApplyReorganization = (
-    updatedTasks: Array<{ id: string; scheduledTime: string }>,
+    updatedTasks: Array<{ id: string; scheduledTime: string; title?: string; description?: string }>,
     updatedEvents: Array<any>,
     detectedPattern: string | null
   ) => {
@@ -1122,6 +1160,18 @@ export default function App() {
           const template = INITIAL_TASKS.find(t => t.id === m.id);
           if (template) {
             updated.push({ ...template, scheduledTime: m.scheduledTime });
+          } else {
+            updated.push({
+              id: m.id,
+              title: m.title || 'New Triage Task',
+              description: m.description || 'Discovered during morning standup.',
+              deadline: 'Today',
+              energyCost: 'Medium',
+              status: 'pending',
+              category: 'Focus',
+              scheduledTime: m.scheduledTime,
+              microSteps: []
+            });
           }
         }
         return updated;
@@ -1795,6 +1845,8 @@ export default function App() {
                 if (!onboarded) {
                   setIsNewUser(true);
                   setTasks([]);
+                  setEvents([]);
+                  setFixedTasks([]);
                 } else {
                   setIsNewUser(false);
                   const savedTasks = localStorage.getItem('flow_guest_tasks');
@@ -1806,6 +1858,28 @@ export default function App() {
                     }
                   } else {
                     setTasks([]);
+                  }
+
+                  const savedEvents = localStorage.getItem('flow_guest_events');
+                  if (savedEvents) {
+                    try {
+                      setEvents(JSON.parse(savedEvents));
+                    } catch (e) {
+                      setEvents([]);
+                    }
+                  } else {
+                    setEvents([]);
+                  }
+
+                  const savedFixed = localStorage.getItem('flow_fixed_tasks');
+                  if (savedFixed) {
+                    try {
+                      setFixedTasks(JSON.parse(savedFixed));
+                    } catch (e) {
+                      setFixedTasks([]);
+                    }
+                  } else {
+                    setFixedTasks([]);
                   }
                 }
                 triggerToast("Entering workspace in Guest Mode. Local fallback activated.");
@@ -1953,6 +2027,17 @@ export default function App() {
               <span>Morning Triage</span>
             </button>
 
+            {/* Evening Standup Trigger Button */}
+            <button
+              id="header-evening-standup-btn"
+              onClick={() => setIsEveningStandupOpen(true)}
+              className="flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all uppercase cursor-pointer border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 shadow-sm animate-fade-in"
+              title="Open Evening Standup daily reflection panel"
+            >
+              <Moon className="w-3.5 h-3.5 text-indigo-600 animate-pulse" />
+              <span>Evening Standup</span>
+            </button>
+
             {/* Top Banner Focus Guard Switch */}
             <button
               id="banner-focus-shield-btn"
@@ -2041,6 +2126,37 @@ export default function App() {
                     handleApplyReorganization(updatedTasks, updatedEvents, detectedPattern);
                     setIsTriageOpen(false);
                   }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Evening Standup Modal Dialog */}
+        {isEveningStandupOpen && (
+          <div id="evening-standup-modal" className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in">
+            <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden relative">
+              <button
+                id="close-evening-modal-btn"
+                onClick={() => setIsEveningStandupOpen(false)}
+                className="absolute top-5 right-5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold p-2 rounded-full cursor-pointer transition-all z-20 w-8 h-8 flex items-center justify-center text-xs"
+                title="Close evening standup panel"
+              >
+                ✕
+              </button>
+              <div className="p-1">
+                <EveningStandup
+                  tasks={tasks}
+                  onSaveReflection={async (reflection) => {
+                    setReflections(prev => [...prev, reflection]);
+                    triggerToast("🎉 Evening Standup successfully logged!");
+                  }}
+                  onClose={() => setIsEveningStandupOpen(false)}
+                  aiProvider={aiProvider}
+                  clientGeminiApiKey={clientGeminiApiKey}
+                  clientOpenaiApiKey={clientOpenaiApiKey}
+                  clientAnthropicApiKey={clientAnthropicApiKey}
+                  clientDeepseekApiKey={clientDeepseekApiKey}
                 />
               </div>
             </div>
@@ -2168,6 +2284,25 @@ export default function App() {
                   className="lg:w-[360px] shrink-0 lg:h-full lg:overflow-y-auto scrollbar-thin flex flex-col gap-6 pr-1 animate-fade-in"
                 >
                   <div className="grid grid-cols-1 gap-6 pb-4 min-h-0">
+                    {enterAsGuest && (
+                      <GuestGuideWidget
+                        onLoadDemoData={() => {
+                          setTasks(INITIAL_TASKS);
+                          setEvents(INITIAL_CALENDAR_EVENTS);
+                          setFixedTasks([
+                            { id: 'f1', title: '🍳 Breakfast & Energize', startTime: '08:00', endTime: '09:00' },
+                            { id: 'f2', title: '🍽️ Lunch Break', startTime: '12:00', endTime: '13:00' },
+                            { id: 'f3', title: '🏋️ Gym / Workout', startTime: '17:00', endTime: '18:00' }
+                          ]);
+                          triggerToast("🎉 Mock demo dataset successfully loaded!");
+                        }}
+                        onNavigateToTab={(tab) => setActiveTab(tab)}
+                        onOpenMorningStandup={() => setIsTriageOpen(true)}
+                        onOpenEveningStandup={() => setIsEveningStandupOpen(true)}
+                        currentTab={activeTab}
+                      />
+                    )}
+
                     {tasks.length === 0 ? (
                       <div className="bg-white border border-dashed border-slate-300 rounded-3xl p-8 text-center flex flex-col items-center justify-center gap-4 shadow-xs animate-fade-in">
                         <div className="w-14 h-14 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-2xl font-bold animate-pulse">

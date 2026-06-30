@@ -2,29 +2,24 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { initializeFirestore } from 'firebase/firestore';
 
-// Hardcoded fallback config from firebase-applet-config.json
-const FALLBACK_CONFIG = {
-  projectId: "kaggle-learning-499603",
-  appId: "1:580502144972:web:3e917ced7d84f870a37f69",
-  apiKey: "AIzaSyCdWgpIm1IImhOIV3KxVhFU0FIGQuzOfGA",
-  authDomain: "kaggle-learning-499603.firebaseapp.com",
-  firestoreDatabaseId: "ai-studio-f7a711e1-2bbf-4389-b06a-c2809fc40b27",
-  storageBucket: "kaggle-learning-499603.firebasestorage.app",
-  messagingSenderId: "580502144972"
-};
-
 const metaEnv = (import.meta as any).env || {};
 
+// Read from environment variables
 const firebaseConfig = {
-  apiKey: metaEnv.VITE_FIREBASE_API_KEY || FALLBACK_CONFIG.apiKey,
-  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || FALLBACK_CONFIG.authDomain,
-  projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || FALLBACK_CONFIG.projectId,
-  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || FALLBACK_CONFIG.storageBucket,
-  messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || FALLBACK_CONFIG.messagingSenderId,
-  appId: metaEnv.VITE_FIREBASE_APP_ID || FALLBACK_CONFIG.appId
+  apiKey: metaEnv.VITE_FIREBASE_API_KEY,
+  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: metaEnv.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: metaEnv.VITE_FIREBASE_APP_ID
 };
 
-const databaseId = metaEnv.VITE_FIREBASE_DATABASE_ID || FALLBACK_CONFIG.firestoreDatabaseId;
+const databaseId = metaEnv.VITE_FIREBASE_DATABASE_ID;
+
+// Validate config
+if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+  console.warn("Firebase configuration is missing or incomplete. Check your environment variables.");
+}
 
 // Initialize Firebase
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();

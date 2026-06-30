@@ -765,7 +765,7 @@ export default function FlowStateCalendar({
         </div>
 
         {/* Hour-by-hour continuous grid layout */}
-        <div className="flex-1 overflow-y-auto min-h-0 pr-1 border border-slate-200 rounded-2xl scrollbar-thin relative bg-white" id="calendar-timeline-scroll-container">
+        <div className="flex-1 overflow-y-auto h-[500px] lg:h-[calc(100vh-320px)] min-h-[350px] pr-1 border border-slate-200 rounded-2xl scrollbar-thin relative bg-white" id="calendar-timeline-scroll-container">
           <div className="relative w-full" style={{ height: '1200px' }}>
             {/* 1. Background click grid */}
             <div className="absolute inset-x-0 top-0 bottom-0 divide-y divide-slate-100">
@@ -1320,7 +1320,7 @@ export default function FlowStateCalendar({
       </div>
 
       {/* Energy Curve & Biorhythms Panel - 5 cols */}
-      <div id="biorhythm-analysis-panel" className="lg:col-span-5 flex flex-col gap-6 lg:overflow-y-auto lg:h-full pr-1 scrollbar-thin min-h-0">
+      <div id="biorhythm-analysis-panel" className="lg:col-span-5 flex flex-col gap-6 lg:overflow-y-auto h-[500px] lg:h-[calc(100vh-230px)] pr-1 scrollbar-thin min-h-0">
 
         {/* Locked Daily Routines Manager Card */}
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-4">

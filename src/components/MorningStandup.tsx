@@ -350,6 +350,18 @@ export default function MorningStandup({
             <span>Circadian calibration model successfully calculated!</span>
           </div>
 
+          {analyzedResults.coachingSummary && (
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50/50 border border-blue-100/70 p-3.5 rounded-xl text-xs shadow-2xs">
+              <div className="flex items-center gap-1.5 text-blue-800 font-bold mb-1 uppercase tracking-wider text-[10px]">
+                <Sparkles className="w-3.5 h-3.5 text-indigo-600 animate-pulse" />
+                <span>FlowDo Coaching Briefing</span>
+              </div>
+              <p className="text-slate-700 leading-relaxed font-semibold font-sans">
+                {analyzedResults.coachingSummary}
+              </p>
+            </div>
+          )}
+
           <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3.5 shadow-sm">
             <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Proposed Calendar Realignments</h4>
             
