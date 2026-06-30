@@ -1320,11 +1320,11 @@ export default function FlowStateCalendar({
       </div>
 
       {/* Energy Curve & Biorhythms Panel - 5 cols */}
-      <div id="biorhythm-analysis-panel" className="lg:col-span-5 flex flex-col gap-6 lg:overflow-y-auto h-[500px] lg:h-[calc(100vh-230px)] pr-1 scrollbar-thin min-h-0">
+      <div id="biorhythm-analysis-panel" className="lg:col-span-5 flex flex-col gap-4 overflow-y-auto h-[500px] lg:h-[calc(100vh-230px)] pr-1 scrollbar-thin min-h-0">
 
         {/* Locked Daily Routines Manager Card */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-3">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
             <div className="flex items-center gap-2">
               <Lock className="w-4 h-4 text-slate-600" />
               <h4 className="text-sm font-bold font-display text-slate-800">Locked Daily Routines</h4>
@@ -1334,24 +1334,24 @@ export default function FlowStateCalendar({
             </span>
           </div>
 
-          <p className="text-xxs text-slate-500 leading-relaxed font-medium">
-            Lock times for key daily habits. These slots act as absolute calendar holds that AI dynamic scheduling will respect and never overwrite.
+          <p className="text-[10px] text-slate-500 leading-normal font-medium">
+            Lock times for key daily habits as absolute calendar holds that AI dynamic scheduling will respect.
           </p>
 
           {/* Active Routines List */}
-          <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+          <div className="space-y-1.5 max-h-[110px] overflow-y-auto pr-1">
             {fixedTasks.map((f) => {
               const isIcal = f.id.startsWith('f-ical-');
               return (
-                <div key={f.id} className={`flex items-center justify-between p-2 rounded-xl border text-xs ${
+                <div key={f.id} className={`flex items-center justify-between p-1.5 rounded-xl border text-[11px] ${
                   isIcal ? 'bg-indigo-50/50 border-indigo-100' : 'bg-slate-50 border-slate-150'
                 }`}>
-                  <div className="flex items-center gap-2 font-semibold text-slate-700">
+                  <div className="flex items-center gap-1.5 font-semibold text-slate-700 min-w-0">
                     <Lock className={`w-3 h-3 shrink-0 ${isIcal ? 'text-indigo-400' : 'text-slate-400'}`} />
-                    <span className={isIcal ? 'text-indigo-950 font-bold' : ''}>{f.title}</span>
+                    <span className={`truncate ${isIcal ? 'text-indigo-950 font-bold' : ''}`}>{f.title}</span>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className={`font-mono text-[10px] px-2 py-0.5 border rounded-md ${
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className={`font-mono text-[9px] px-1.5 py-0.5 border rounded-md ${
                       isIcal ? 'bg-white border-indigo-100 text-indigo-800 font-bold' : 'bg-white border-slate-200 text-slate-500'
                     }`}>
                       {f.startTime} - {f.endTime}
@@ -1368,21 +1368,21 @@ export default function FlowStateCalendar({
               );
             })}
             {fixedTasks.length === 0 && (
-              <div className="text-center py-4 text-slate-400 italic text-xs">
+              <div className="text-center py-3 text-slate-400 italic text-[11px]">
                 No active routine holds. Click below to add one.
               </div>
             )}
           </div>
 
           {/* Inline Form to Add Routine */}
-          <form onSubmit={handleAddFixedTask} className="border-t border-slate-100 pt-3 space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              <div>
+          <form onSubmit={handleAddFixedTask} className="border-t border-slate-100 pt-2.5 space-y-2.5">
+            <div className="grid grid-cols-12 gap-2">
+              <div className="col-span-6">
                 <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Activity</label>
                 <select
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs text-slate-700 outline-none focus:border-blue-500 focus:bg-white"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs text-slate-700 outline-none focus:border-blue-500 focus:bg-white cursor-pointer"
                 >
                   <option value="🍳 Breakfast">🍳 Breakfast</option>
                   <option value="🍽️ Lunch Break">🍽️ Lunch Break</option>
@@ -1393,35 +1393,36 @@ export default function FlowStateCalendar({
                 </select>
               </div>
 
-              <div>
-                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Time Range</label>
-                <div className="flex items-center gap-1">
-                  <select
-                    value={newStart}
-                    onChange={(e) => setNewStart(e.target.value)}
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs text-slate-700 outline-none focus:border-blue-500 focus:bg-white font-mono cursor-pointer"
-                  >
-                    {generateTimeOptions(wakeHour, 24).slice(0, -1).map(opt => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
-                  <span className="text-slate-400 text-xxs font-bold">to</span>
-                  <select
-                    value={newEnd}
-                    onChange={(e) => setNewEnd(e.target.value)}
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs text-slate-700 outline-none focus:border-blue-500 focus:bg-white font-mono cursor-pointer"
-                  >
-                    {(() => {
-                      const startMins = timeToMinutes(newStart);
-                      const allOptions = generateTimeOptions(wakeHour, 24);
-                      return allOptions
-                        .filter(opt => timeToMinutes(opt) > startMins)
-                        .map(opt => (
-                          <option key={opt} value={opt}>{opt}</option>
-                        ));
-                    })()}
-                  </select>
-                </div>
+              <div className="col-span-3">
+                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">From</label>
+                <select
+                  value={newStart}
+                  onChange={(e) => setNewStart(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs text-slate-700 outline-none focus:border-blue-500 focus:bg-white font-mono cursor-pointer"
+                >
+                  {generateTimeOptions(wakeHour, 24).slice(0, -1).map(opt => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="col-span-3">
+                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">To</label>
+                <select
+                  value={newEnd}
+                  onChange={(e) => setNewEnd(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs text-slate-700 outline-none focus:border-blue-500 focus:bg-white font-mono cursor-pointer"
+                >
+                  {(() => {
+                    const startMins = timeToMinutes(newStart);
+                    const allOptions = generateTimeOptions(wakeHour, 24);
+                    return allOptions
+                      .filter(opt => timeToMinutes(opt) > startMins)
+                      .map(opt => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ));
+                  })()}
+                </select>
               </div>
             </div>
 
@@ -1439,15 +1440,15 @@ export default function FlowStateCalendar({
             )}
 
             {errorMsg && (
-              <div className="flex items-center justify-between gap-1.5 text-rose-600 bg-rose-50 border border-rose-100 p-2.5 rounded-xl text-xxs font-bold animate-fade-in">
-                <div className="flex items-center gap-1.5">
-                  <ShieldAlert className="w-3.5 h-3.5 shrink-0 animate-pulse" />
-                  <span>{errorMsg}</span>
+              <div className="flex items-center justify-between gap-1.5 text-rose-600 bg-rose-50 border border-rose-100 p-2 rounded-xl text-[10px] font-bold animate-fade-in">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <ShieldAlert className="w-3.5 h-3.5 shrink-0 animate-pulse text-rose-500" />
+                  <span className="truncate">{errorMsg}</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setErrorMsg('')}
-                  className="text-rose-400 hover:text-rose-600 font-bold px-1.5 py-0.5 rounded hover:bg-rose-100/50 transition-colors"
+                  className="text-rose-400 hover:text-rose-600 font-bold px-1 rounded hover:bg-rose-100/50 transition-colors shrink-0"
                   title="Dismiss error message"
                 >
                   ✕

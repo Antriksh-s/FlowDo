@@ -29,7 +29,7 @@ export default function FocusModeWidget({
   const completedFocusStepsCount = verifiedLogs.length;
 
   return (
-    <div id="focus-mode-hub-panel" className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm text-slate-800 font-sans flex flex-col gap-4 relative overflow-hidden w-full">
+    <div id="focus-mode-hub-panel" className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm text-slate-800 font-sans flex flex-col gap-4 relative w-full">
       {/* Visual background accents */}
       {isFocusActive && (
         <div className="absolute top-0 right-0 w-48 h-48 bg-blue-500/5 rounded-full filter blur-2xl pointer-events-none animate-pulse"></div>

@@ -1901,7 +1901,7 @@ export default function App() {
   }
 
   return (
-    <div id="flowdo-root-app" className="min-h-screen lg:h-screen lg:max-h-screen lg:overflow-hidden bg-slate-50 text-slate-900 flex flex-col relative selection:bg-blue-500/20 selection:text-blue-700">
+    <div id="flowdo-root-app" className="min-h-screen pb-12 bg-slate-50 text-slate-900 flex flex-col relative selection:bg-blue-500/20 selection:text-blue-700">
       {/* Background Task File Stack Animation Backdrop */}
       <TaskFileStack tasks={tasks} />
 
@@ -2097,11 +2097,11 @@ export default function App() {
       </header>
 
       {/* Main Container Area */}
-      <main id="app-main-content" className="flex-1 p-6 max-w-full mx-auto w-full flex flex-col gap-6 lg:overflow-hidden min-h-0">
+      <main id="app-main-content" className="flex-1 p-6 max-w-full mx-auto w-full flex flex-col gap-6 min-h-0">
         {/* Morning Triage Modal Dialog */}
         {isTriageOpen && (
           <div id="morning-triage-modal" className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-            <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden relative">
+            <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[90vh] overflow-y-auto scrollbar-thin relative">
               <button
                 id="close-triage-modal-btn"
                 onClick={() => setIsTriageOpen(false)}
@@ -2135,7 +2135,7 @@ export default function App() {
         {/* Evening Standup Modal Dialog */}
         {isEveningStandupOpen && (
           <div id="evening-standup-modal" className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in">
-            <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden relative">
+            <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[90vh] overflow-y-auto scrollbar-thin relative">
               <button
                 id="close-evening-modal-btn"
                 onClick={() => setIsEveningStandupOpen(false)}
@@ -2276,12 +2276,12 @@ export default function App() {
             )}
 
             {/* Dashboard Core Layout */}
-            <div className="flex-1 flex flex-col lg:flex-row gap-6 items-stretch lg:overflow-hidden min-h-0">
+            <div className="flex-1 flex flex-col lg:flex-row gap-6 items-stretch min-h-0">
               {/* Left Column: Core Work & Focus Widgets (Shown only when toggled) */}
               {showSandbox && (
                 <div
                   id="main-widgets-container"
-                  className="lg:w-[360px] shrink-0 lg:h-full lg:overflow-y-auto scrollbar-thin flex flex-col gap-6 pr-1 animate-fade-in"
+                  className="lg:w-[360px] shrink-0 flex flex-col gap-6 pr-1 animate-fade-in"
                 >
                   <div className="grid grid-cols-1 gap-6 pb-4 min-h-0">
                     {enterAsGuest && (
@@ -2335,7 +2335,7 @@ export default function App() {
               {/* Central Timeline Area (Always displayed, expands to full width when sandbox is closed) */}
               <div
                 id="calendar-sidebar-container"
-                className="flex-1 lg:h-full bg-white border border-slate-200/80 p-5 rounded-2xl shadow-sm flex flex-col min-h-0"
+                className="flex-1 bg-white border border-slate-200/80 p-5 rounded-2xl shadow-sm flex flex-col min-h-0"
               >
                 <div className="flex flex-col h-full gap-4 min-h-0">
                   <div className="flex-1 flex flex-col min-h-0">
@@ -3007,98 +3007,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Predefined Daily Tasks/Routines */}
-                  <div className="space-y-2 bg-white p-4 rounded-xl border border-slate-100 shadow-xxs">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider block">
-                        Predefined Daily Routines ({fixedTasks.length})
-                      </span>
-                      <span className="text-[9px] text-slate-400 font-bold font-mono uppercase">
-                        cost: {predefinedDailyMinutes}m
-                      </span>
-                    </div>
 
-                    <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
-                      {fixedTasks.map((ft) => {
-                        const duration = getFixedTaskDuration(ft);
-                        return (
-                          <div key={ft.id} className="flex items-center justify-between bg-slate-50/70 p-2 rounded-lg border border-slate-100 text-[11px]">
-                            <span className="font-semibold text-slate-700 text-xxs truncate max-w-[130px]">{ft.title}</span>
-                            <div className="flex items-center gap-2 text-xxs font-mono text-slate-500">
-                              <span>{ft.startTime} - {ft.endTime}</span>
-                              <span className="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-bold font-sans">
-                                {duration}m
-                              </span>
-                              <button
-                                onClick={() => handleDeleteFixedTask(ft.id)}
-                                className="text-rose-500 hover:text-rose-700 cursor-pointer"
-                                title="Remove predefined block"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Add Inline Routine Form */}
-                    <div className="bg-indigo-50/30 p-2 rounded-xl border border-indigo-100/60 mt-2 space-y-2">
-                      <span className="text-[9px] font-bold text-indigo-700 uppercase tracking-wider block">Add Custom Routine</span>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        <input
-                          type="text"
-                          placeholder="e.g. Sync Call"
-                          value={newFixedTitle}
-                          onChange={(e) => setNewFixedTitle(e.target.value)}
-                          className="bg-white border border-indigo-100 rounded-lg px-2 py-1 text-xxs focus:outline-none focus:border-indigo-500"
-                        />
-                        <div className="flex items-center gap-1.5">
-                          <select
-                            value={newFixedStart}
-                            onChange={(e) => setNewFixedStart(e.target.value)}
-                            className="bg-white border border-indigo-100 rounded-lg p-1 text-xxs text-slate-600 focus:outline-none w-full"
-                          >
-                            {Array.from({ length: 24 }).map((_, i) => {
-                              const str = `${i.toString().padStart(2, '0')}:00`;
-                              return <option key={str} value={str}>{str}</option>;
-                            })}
-                          </select>
-                          <span className="text-slate-400 text-xxs">to</span>
-                          <select
-                            value={newFixedEnd}
-                            onChange={(e) => setNewFixedEnd(e.target.value)}
-                            className="bg-white border border-indigo-100 rounded-lg p-1 text-xxs text-slate-600 focus:outline-none w-full"
-                          >
-                            {Array.from({ length: 24 }).map((_, i) => {
-                              const str = `${i.toString().padStart(2, '0')}:00`;
-                              return <option key={str} value={str}>{str}</option>;
-                            })}
-                          </select>
-                        </div>
-                        <button
-                          onClick={() => {
-                            if (!newFixedTitle.trim()) {
-                              triggerToast("⚠️ Please enter a routine name.");
-                              return;
-                            }
-                            const [sh] = newFixedStart.split(':').map(Number);
-                            const [eh] = newFixedEnd.split(':').map(Number);
-                            if (sh >= eh) {
-                              triggerToast("⚠️ Start hour must be earlier than End hour.");
-                              return;
-                            }
-                            handleAddFixedTask(newFixedTitle, newFixedStart, newFixedEnd);
-                            setNewFixedTitle('');
-                          }}
-                          className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1 px-3 rounded-lg text-xxs flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                        >
-                          <Plus className="w-3 h-3" />
-                          <span>Add Routine</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
 
                   {/* Planned Tasks Durations */}
                   <div className="space-y-2 bg-white p-4 rounded-xl border border-slate-100 shadow-xxs">

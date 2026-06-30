@@ -31,7 +31,7 @@ export default function FrictionlessWidget({ task, onStepCompleted }: Frictionle
   };
 
   return (
-    <div id="frictionless-sandbox-panel" className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm text-slate-850 font-sans flex flex-col gap-4 relative overflow-hidden w-full">
+    <div id="frictionless-sandbox-panel" className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm text-slate-850 font-sans flex flex-col gap-4 relative w-full">
       {/* Decorative subtle ambient light */}
       <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full filter blur-xl pointer-events-none"></div>
 
@@ -62,13 +62,13 @@ export default function FrictionlessWidget({ task, onStepCompleted }: Frictionle
         <span>Your energy is projected to dip soon. Work on the outline drafts below to protect your cognitive flow.</span>
       </div>
 
-      {/* Two-Column Execution Bento Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 mt-1 items-stretch">
+      {/* Execution Step and Focus Stack */}
+      <div className="flex flex-col gap-4 mt-1">
         
-        {/* Column 1: Step Checklist Selector (col-span-5) */}
-        <div className="lg:col-span-5 flex flex-col gap-2">
+        {/* Step Checklist Selector */}
+        <div className="flex flex-col gap-2">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Micro-Step Queue:</span>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto pr-1 scrollbar-thin">
             {task.microSteps.map((step, idx) => {
               const isActive = idx === activeStepIdx;
               const isDone = step.status === 'done';
@@ -78,9 +78,9 @@ export default function FrictionlessWidget({ task, onStepCompleted }: Frictionle
                   key={step.id}
                   id={`micro-step-card-${step.id}`}
                   onClick={() => handleStepClick(idx)}
-                  className={`w-full p-3 rounded-xl border text-left transition-all flex items-start gap-2.5 cursor-pointer relative ${
+                  className={`w-full p-2.5 rounded-xl border text-left transition-all flex items-start gap-2.5 cursor-pointer relative ${
                     isActive
-                      ? 'bg-blue-50/40 border-blue-400 text-slate-850 shadow-xs'
+                      ? 'bg-blue-50/40 border-blue-400 text-slate-850 shadow-xs font-semibold'
                       : 'bg-white hover:bg-slate-50/50 border-slate-200 text-slate-600'
                   }`}
                 >
@@ -99,10 +99,10 @@ export default function FrictionlessWidget({ task, onStepCompleted }: Frictionle
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className={`text-xs font-bold font-display ${isActive ? 'text-slate-800' : 'text-slate-700'} leading-tight`}>
+                    <div className={`text-[11px] font-bold font-display ${isActive ? 'text-slate-850' : 'text-slate-700'} leading-tight`}>
                       {step.title}
                     </div>
-                    <div className="text-[9px] text-slate-400 mt-1 font-bold uppercase tracking-wider flex items-center gap-2">
+                    <div className="text-[9px] text-slate-400 mt-0.5 font-bold uppercase tracking-wider flex items-center gap-1.5">
                       <span>{step.estimatedMinutes} Mins</span>
                       <span>•</span>
                       <span className={step.energyRequired === 'High' ? 'text-rose-500' : step.energyRequired === 'Medium' ? 'text-amber-500' : 'text-emerald-500'}>
@@ -119,8 +119,8 @@ export default function FrictionlessWidget({ task, onStepCompleted }: Frictionle
           </div>
         </div>
 
-        {/* Column 2: Interactive Focus Console (col-span-7) */}
-        <div className="lg:col-span-7 flex flex-col bg-slate-50 rounded-xl border border-slate-200 p-4 justify-between gap-3 min-h-[250px]">
+        {/* Interactive Focus Console */}
+        <div className="flex flex-col bg-slate-50 rounded-xl border border-slate-200 p-3 justify-between gap-3 min-h-[220px]">
           {activeStep ? (
             <div className="flex flex-col gap-3 flex-1">
               
